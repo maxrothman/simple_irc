@@ -8,7 +8,7 @@ Usage
 1. Instantiate it
 
     ```
-    myIRC = irc.irc(nickname, channel, irc.network.net)
+    myIRC = irc.irc("nickname", "channel", "irc.network.net")
     ```
     
 2. Read from it
