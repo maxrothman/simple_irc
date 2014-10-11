@@ -6,7 +6,7 @@ A simple, Pythonic IRC interface
 Usage
 ---
 1. Instantiate it
-2. 
+
     ```
     myIRC = irc.irc(nickname, channel, irc.network.net)
     ```
