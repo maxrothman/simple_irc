@@ -1,6 +1,20 @@
-#!/usr/bin/python
+"""
+simple_irc: a simple, Pythonic IRC interface.
 
-#TODO: write tests
+This module contains 2 classes: an IRC adapter, and a message wrapper.
+
+Basic usage:
+  >>> irc = simple_irc.IRC('mynick', '#python', 'irc.myserver.net')
+  >>> for msg in irc: print(msg.sender + ': ' + msg)
+  somebody: Hello, simple_irc!
+  somebody_else: Oh hai there!
+  >>> irc.write('Hi guys!')
+"""
+
+__author__ = "Max Rothman"
+__copyright__ = "Copyright 2014 Max Rothman"
+__license__ = "MIT"
+__version__ = "1.0"
 
 import socket, threading, time, Queue
 
@@ -8,7 +22,7 @@ _wait = .01
 
 class IRC(object):
   '''A simple IRC interface that can handle simultaneous reading and writing.
-  Has an interface similar to those in the io module.'''
+  Its interface is similar to those in the io module.'''
 
   def __init__(self, nick, channel, network, port=6667, future=False,
                mode=2, realname='Python simpleirc bot'):
@@ -24,8 +38,8 @@ class IRC(object):
       realname: real name field. Can be any string.
     '''
 
-    self.channel = channel
     self.nick = nick
+    self.channel = channel
     self.network = network
     self.port = port
     self.mode = mode
@@ -33,7 +47,6 @@ class IRC(object):
 
     self._readqueue = Queue.Queue()
     self._writequeue = Queue.Queue()
-    self._soc = socket.socket ( socket.AF_INET, socket.SOCK_STREAM )
     self._closed = True
 
     if not future:
@@ -45,12 +58,14 @@ class IRC(object):
     if not self._closed:
       raise IOError(self + " is already open")
 
+    self._soc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     self._soc.connect((self.network, self.port))
     self._soc.send('NICK {}\r\n'.format(self.nick))
     self._soc.send('USER {} {} * :{}\r\n'.format(self.nick, self.mode, self.realname))
     self._soc.send('JOIN {}\r\n'.format(self.channel))
 
     while True:
+      #Read through all of the opening garbage
       data = self._soc.recv(4096)
       
       #Error messages don't follow the same format as others, 
@@ -58,11 +73,12 @@ class IRC(object):
       code = data.split()[1]
       if code.isdigit() and 400<=int(code)<=499:  
         raise ValueError(data.split(':')[2])
-      elif "End of /NAMES list." in data:
+      elif "End of /NAMES list." in data:   #This is the last message before it's all good for some reason
         break
     
     self._soc.settimeout(_wait)   #the threads use this for nonblocking io
     self._closed = False
+
     tread = threading.Thread(target=self._reader)
     tread.daemon = True
     tread.start()
@@ -71,19 +87,6 @@ class IRC(object):
     twrite.daemon = True
     twrite.start()
 
-  def close(self):
-    '''Close the IRC connection'''
-    self._closed = True
-    time.sleep(2*_wait)   #wait for writer thread to terminate
-    self._soc.send("QUIT\r\n")
-    self._soc.close()
-    del self._writequeue, self._readqueue
-
-  @property
-  def closed(self):
-    '''True if the IRC connection is closed'''
-    return self._closed
-
 
   def _reader(self):
     '''Message reader thread'''
@@ -91,6 +94,7 @@ class IRC(object):
       try: data = self._soc.recv(4096)
       except socket.timeout: continue
       
+      print data
       if 'PING' in data:  #so we don't get booted
         self._soc.send ('PONG ' + data.split()[1] + '\r\n')
       else:
@@ -102,11 +106,25 @@ class IRC(object):
       time.sleep(_wait)
       if not self._writequeue.empty():
         msg = self._writequeue.get()
-        self._soc.send("PRIVMSG {} :{}\r\n".format(self.channel, msg))
         self._writequeue.task_done()
+        self._soc.send("PRIVMSG {} :{}\r\n".format(self.channel, msg))
 
 
-  def _msgiterator(self):
+  def __next__(self):
+    msg = self.read()
+    if msg is None:
+      raise StopIteration
+    else:
+      return msg
+
+  #Python2 compatability
+  next = __next__
+
+  def __iter__(self):
+    return iter(self.read, None)
+
+  def read(self):
+    '''Returns the oldest unread message, or None if there are no unread messages.'''
     if self._readqueue.empty():
       return None
     else:
@@ -114,35 +132,17 @@ class IRC(object):
       self._readqueue.task_done()
       return msg
 
-  def __next__(self):
-    msg = self._msgiterator()
-    if msg is None:
-      raise StopIteration
-    else:
-      return msg
-
-  def next(self): return self.__next__()
-
-  def __iter__(self):
-    return iter(self._msgiterator, None)
-
-  def read(self):
-    '''Returns a single message, oldest first, or None if there are no unread messages.'''
-    try:
-      return self.__next__()
-    except StopIteration:
-      return None
-
   def readall(self, limit=None):
     '''Returns a list of at most <limit> unread messages.
-    If limit is unspecified, reads all messages.'''
-    i=0
-    l=[]
-    for m in self:
+    If limit is unspecified, returns all unread messages.'''
+    i = 0
+    l = []
+    for m in self:  #self is an iterable!
       l.append(m)
-      i+=1
+      i += 1
       if limit is not None and i>=limit:
         break
+
     return l
 
   def write(self, msg):
@@ -150,9 +150,31 @@ class IRC(object):
     self._writequeue.put(msg)
 
   def writeall(self, msgs):
-    '''Write an iterable of messages to the connected channel'''
+    '''Write all messages in an iterable to the connected channel'''
     for m in msgs:
       self.write(m)
+
+
+  def close(self):
+    '''Close the IRC connection'''
+    self._closed = True
+    time.sleep(2*_wait)   #wait for threads to terminate
+    self._soc.send("QUIT\r\n")
+    self._soc.close()
+    del self._writequeue, self._readqueue
+
+  @property
+  def closed(self):
+    '''True if the IRC connection is closed'''
+    return self._closed
+
+
+  def __enter__(self):
+    return self
+
+  def __exit__(self, exception_type, exception_value, traceback):
+    self.close()
+    return True
 
 
 
@@ -160,12 +182,12 @@ class message(str):
   '''An IRC message.
 
   Properties:
-  - code: the response code
   - sender: the sender
-  - to: the intended receiver
+  - hostname: the hostname of the sender
   '''
   def __new__(cls, raw):
     self = str.__new__(cls, raw.split(':')[2].rstrip())
-    raw = raw.split()
-    self.sender, self.code, self.to = raw[0][1:], raw[1], raw[2]
+    raw = raw.split(':')
+    self.sender = raw[1].split('!')[0]
+    self.hostname = raw[1].split()[0].split('@')[1]
     return self
