@@ -16,7 +16,10 @@ __copyright__ = "Copyright 2014 Max Rothman"
 __license__ = "MIT"
 __version__ = "1.0"
 
-import socket, threading, time, Queue
+import socket, threading, time, sys
+if sys.version_info.major < 3:
+  import Queue
+else: import queue as Queue
 
 _wait = .01
 
@@ -60,13 +63,13 @@ class IRC(object):
 
     self._soc = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     self._soc.connect((self.network, self.port))
-    self._soc.send('NICK {}\r\n'.format(self.nick))
-    self._soc.send('USER {} {} * :{}\r\n'.format(self.nick, self.mode, self.realname))
-    self._soc.send('JOIN {}\r\n'.format(self.channel))
+    self._soc.send('NICK {}\r\n'.format(self.nick).encode('UTF-8'))
+    self._soc.send('USER {} {} * :{}\r\n'.format(self.nick, self.mode, self.realname).encode('UTF-8'))
+    self._soc.send('JOIN {}\r\n'.format(self.channel).encode('UTF-8'))
 
     while True:
       #Read through all of the opening garbage
-      data = self._soc.recv(4096)
+      data = self._soc.recv(4096).decode('UTF-8')
       
       #Error messages don't follow the same format as others, 
       #so we parse the code out early
@@ -91,10 +94,9 @@ class IRC(object):
   def _reader(self):
     '''Message reader thread'''
     while not self._closed:
-      try: data = self._soc.recv(4096)
+      try: data = self._soc.recv(4096).decode('UTF-8')
       except socket.timeout: continue
       
-      print data
       if 'PING' in data:  #so we don't get booted
         self._soc.send ('PONG ' + data.split()[1] + '\r\n')
       else:
@@ -107,7 +109,7 @@ class IRC(object):
       if not self._writequeue.empty():
         msg = self._writequeue.get()
         self._writequeue.task_done()
-        self._soc.send("PRIVMSG {} :{}\r\n".format(self.channel, msg))
+        self._soc.send("PRIVMSG {} :{}\r\n".format(self.channel, msg).encode('UTF-8'))
 
 
   def __next__(self):
@@ -159,7 +161,7 @@ class IRC(object):
     '''Close the IRC connection'''
     self._closed = True
     time.sleep(2*_wait)   #wait for threads to terminate
-    self._soc.send("QUIT\r\n")
+    self._soc.send("QUIT\r\n".encode('UTF-8'))
     self._soc.close()
     del self._writequeue, self._readqueue
 
